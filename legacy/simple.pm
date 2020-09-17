@@ -26,8 +26,6 @@ my $me = "UnifiedBibDataAccess";
 my $verbose = "";
 
 my %repoalias = qw(
-ES ESSA
-GS GoogleScholar
 ER Zotero
 ERIC Zotero
 eric Zotero
@@ -78,9 +76,6 @@ foreach (keys %repoalias) {
 };
 
 my %process = (
-    # Text-based formats
-    ESSA => \&processESSA,
-    GoogleScholar => \&processGoogleScholar,
     # json-based formats
     Zotero  => \&processZotero,
     Elsevier => \&processElsevier,
@@ -132,194 +127,12 @@ foreach (@protoStat) {
     $protoStat{$_} = "";
 };
 
-
-sub whichpm() {
-    #usage $0 Some::Module 
-    my $file = $_[0];
-    my $f;
-    my $m;
-    ($f=($m=$file).".pm")=~s{::}{/}g;
-    eval "require $m" and return $INC{$f}.$/;
-};
-
-sub whichpmpath() {
-    my $me = $_[0];
-    my $here = &whichpm("My::$me");
-    $here =~ s/\/$me\.pm//;
-    $here =~ s/\n//;
-    return $here;
-};
-
-
-# Find $xmljson:
-my $here = &whichpmpath($me);
-
-my $xmljson = "$here/xml2json.js";
-die("No $xmljson") if !-e $xmljson;
-
-#important
-1;
-
-# ------------- functions --------------------
-sub protoFields() {
-    return @protoFields;
-};
-
-sub protoStat() {
-    return @protoStat;
-};
-
-sub ubaUsage() {
-    
-say "
-
-Usage:
-
-use My::UnifiedBibDataAccess qw(@exportedItems);
-&ubaUsage();
-# supply data type
-print &ubaShow(&uba(\"ESSA\",\$string)); 
-# detect type from filename
-print &ubaShow(&ubaFile(\"?\",\$filename)); 
-# or detect file type from a string, such as the filename: 
-print &ubaShow(&uba(\$filename,\$f)); 
-
-The possible types are shown below.
-
-my \@items = &ubaFile(\"GS\",\$somefile);
-          = &uba(\"SD\",\$anystring);
-print &ubaShow(\@items); 
-
-";
-foreach (keys %repoalias) {
-    if (!$process{$repoalias{$_}}) {
-	print "WARNING: No subrouting associated with $repoalias{$_}\n";
-    };
-};
-say "Available types (associated with functions):\n\t";
-say join("\n\t",sort keys %process);
-say "\nAvailable types (aliases): ";
-foreach (sort keys %repoalias) {
-    next if $_ eq $repoalias{$_};
-    say "\t$_ -> $repoalias{$_}";
-};
-
-
-};
-
-
-sub ubaFile() {
-    (my $type, my $file) = @_;    
-    if ($type eq "" || $type eq "?") {
-	foreach my $k (keys %repoalias) {
-	    if ($file =~ m/\_$k\-/ || $file =~ m/\/$k\./) {
-		# say "Detected type: $k -> $repoalias{$k}";
-		$type = $repoalias{$k};
-	    };
-	};
-    };
-    if ($type =~ m/(ProQuest|WebOfScience)/i) {
-	my $repo = $1;
-	if (
-	    ($file =~ m/\.(te?xt)$/i && $type !~ m/(TEXT)/)
-	    ||
-	    ($file =~ m/\.(xml)$/i && $type !~ m/(XML)/)
-	    ||
-	    ($file =~ m/\.(json)$/i && $type !~ m/(JSON)/)
-	    )
-	{
-	    print "Repository $repo with type $type. However, file has extention $1 and type does not indicate $2. Expect an error.";
-	};
-
-    };
-    open F,"$file" or die("Sorry,  $me\:ubaFile could not open file $_");
-    my @f = <F>;
-    close F;
-    my $f = join("",@f);
-    if ($type ne "GoogleScholar") {
-	$f =~ s/\n__META__\n.*$//s;
-    };
-    return &uba($type,$f);
-};
-
-sub ubaShow() {
-    my @items = @_;
-    if ($items[0] eq "0") {
-	print STDERR "UnifiedBibDataAccess::ubaShow: Error in input\n";	
-    };
-    my %stat = %{$items[0]};
-    my $str = "";
-    foreach (@protoStat) {
-	$str .= "$_: $stat{$_}\n";
-    };
-    my $n = 0;
-    foreach (@items[1..$#items]) {
-	$str .= "---- number: $n ----\n";
-	$n++;
-	my %x = %{$_};
-	foreach (@protoFields) {
-	    if ($x{$_} ne "") {
-		if ($_ eq "itemdata") {
-		    if ($x{itemdatatype} eq "json") {
-			$str .= "$_ (decoded json / Dumper):\n".Dumper(decode_json(encode_utf8($x{itemdata})))."\n";
-		    } elsif ($x{itemdatatype} eq "text") {
-			$str .= "$_ (text):".popOut($x{itemdata})."\n";
-		    } else {
-			$str .= "$_ (unknown): $x{$_}\n";
-		    };
-		} elsif ($_ eq "links") {		
-		    $str .= "$_: ".popOut($x{$_})."\n";
-		} else {
-		    $str .= "$_: $x{$_}\n";
-		};
-	    } else {
-		$str .= "$_: <MISSING>\n";
-	    };
-	};
-    };
-    return $str;
-};
-
-sub popOut() {
-    my $z = $_[0];
-    $z =~ s/\n$//s;
-    if ($z =~ m/\n/s) {
-	my @a = split /\n/,$_[0];
-	my $a =  "\n";
-	foreach (@a) {
-	    $a .=  "\t|\t$_\n";
-	};
-	return $a;
-    } else {
-	return $z;
-    };
-};
-
 sub uba() {
     (my $type, my $string) = @_;
-    # This fn expects a type - but if a filename-type string is given as type, the type is detected from the string.
-    # Moreover, __META__ is removed from the string if necessary.
-    if ($type =~ /^\?/ || $type =~ /\W/) {
-	my $found = "";
-	foreach my $k (keys %repoalias) {
-	    # if more than one matches... it becomes a bit random....
-	    if ($type =~ m/\_$k\-/ || $type =~ m/\/$k\./) {
-		### say "Detected type: $k -> $repoalias{$k}";
-		$found = $repoalias{$k};
-	    };
-	};
-	$type = $found if $found;
-	if ($type ne "GoogleScholar") {
-	    $string =~ s/\n__META__\n.*$//s;
-	};
-    };
-    #say "$type, $string";
-    if ($repoalias{$type}) {
-	$type = $repoalias{$type};
-    };
-    #print STDERR "-->$type\n";
     if ($process{$type}) {
+	# e.g.:
 	# $type="WebOfScienceXML";
+	# which means:
 	# $process{$type}= \&processWebOfScienceXML;
 	print "PROCESSING WITH \$process{$type}\n" if $verbose;
 	# my @item = &processWebOfScienceXML($string);
@@ -339,22 +152,11 @@ sub uba() {
     };
 };
 
-sub prettyJson() {
-    use IPC::Open2;
-    use Symbol;
-    my $WTR = gensym();  # get a reference to a typeglob
-    my $RDR = gensym();  # and another one
-    my $pid = open2($RDR, $WTR, 'python -m json.tool');
-    print $WTR $_[0];
-    close($WTR);    # finish sending all output to sort(1)    
-    my $out = join "",<$RDR>;
-    return $out;
-    waitpid($pid, 0);    
-};
-
 #----------------------- internal functions -----------------------------
 
+# REMINDER: Check titles for white space.
 sub fixTitle() {
+    # make lower case, and trim white space.
     my $a = $_[0];
     $a = lc($a);
     $a =~ s/^\s*//;
@@ -383,6 +185,7 @@ sub getValue() {
 	return "";
     };
 };
+
 sub getArrayFromScalar() {
     if ($#_ == 0) {	
 	if (defined $_[0]) {
@@ -422,7 +225,6 @@ sub makeArrayFromRef() {
     };
 };
 
-
 sub makeArrayFromRefHint() {
     if ($#_ == 1) {	
 	if ($_[0]) {
@@ -448,46 +250,6 @@ sub makeArrayFromRefHint() {
 
 
 #--------------------- parsing ----------------------------
-
-# Text-based formats:
-sub processTEXT() {
-    my %stat = %protoStat; 
-    my @items = ();
-    my @oitems = ();
-    my $text = $_[0];
-    #TODO should split text on RECORD:: or similar... @items = split /.../,...;
-    if ($text =~ m/\nRECORD\:\:\n/s) {
-	say "SPLITTING INPUT TEXT";
-	@items = split /\nRECORD\:\:\n/s, $text;
-	$stat{total} = $#items+1;
-	push @oitems,\%stat;
-    } else {
-	say "KEEPING INPUT TEXT (TEXT)";
-	$stat{total} = 1;
-	push @oitems,\%stat;
-	@items = ($text);
-    };
-    foreach (@items) {
-	my %x = %protoFields;
-	$x{itemdata} = $_;
-	$x{itemdatatype} = "text";
-	my @a = split /\n/,$_;
-	foreach my $line (@a) {
-	    foreach my $k (keys %x) {
-		(my $m = $k) =~ s/s$//;
-		if ($line =~ m/^(?:$m)s?(?:\:?\s+)(\S.*)$/i) {
-		    $x{$k} = $1;
-		};
-	    };
-	    #proquest
-	    if ($line =~ m/^(?:daterange)(?:\:?\s+)d(\d\d\d\d)/) {
-		$x{year} = $1;
-	    };
-	};
-	push @oitems, \%x;
-    };
-    return @oitems;
-};
 
 sub myExists {
     my $hash = shift;
@@ -516,6 +278,54 @@ sub getIDericjolis() {
     #say "OUT $u";
     return $u;
 };
+
+# Template - simplest way of converting.
+sub processBibJson() {
+    my %stat = %protoStat; 
+    my @items = ();
+    my @oitems = ();
+    my $json = decode_json(encode_utf8($_[0]));
+    # print Dumper($json);
+    if ($json->{'results'}) {
+	$stat{total} = &getValue($json->{'total'});
+	$stat{pageSize} = &getValue($json->{'pageSize'});
+	$stat{page} = &getValue($json->{'page'});
+	@items = @{$json->{'results'}};
+    } else {
+	$stat{total} = 1;
+	$json = decode_json("{\"items\": [".encode_utf8($_[0])."]}");
+	@items = @{$json->{'items'}};
+    };
+    push @oitems,\%stat;
+    foreach (@items) {
+	my %x = %protoFields;
+	## add json string of the item
+	$x{itemdata} = decode_utf8(encode_json($_));
+	$x{itemdatatype} = "json";
+	$x{"title"} = &getValue($_->{"title"});
+	$x{"additionalTitles"} = &getValue($_->{"additionalTitles"});
+	$x{"authors"} = &getValue($_->{"authors"});
+ 	my @x = &getArrayFromScalar($_->{'creators'});
+	foreach(@x) { 
+	    $x{authors} .= "[".&getValue($_->{'creatorType'})."] ".&getValue($_->{'lastName'}).", ".&getValue($_->{'firstName'})."; ";
+	};
+	$x{"year"} = &getValue($_->{"year"});
+	$x{"publicationType"} = &getValue($_->{"publicationType"});
+	$x{"containerName"} = &getValue($_->{"containerName"});
+	$x{"isbn"} = &getValue($_->{"isbn"});
+	$x{"doi"} = &getValue($_->{"doi"});
+	$x{"keywords"} = &getValue($_->{"keywords"});
+	$x{"abstract"} = &getValue($_->{"abstract"});
+	@x = &getArrayFromScalar($_->{'tags'});
+	foreach(@x) { 
+	    $x{keywords} .= &getValue($_->{'tag'})."; ";
+	};       
+	push @oitems, \%x;
+    };
+    return @oitems;
+};
+
+#--------------------- json-based formats --------------------------------------------------------
 
 sub processZotero() {
     # say "Zotero";
@@ -798,54 +608,7 @@ sub processDOAJ() {
     return @oitems;
 };
 
-# Template
-sub processBibJson() {
-    my %stat = %protoStat; 
-    my @items = ();
-    my @oitems = ();
-    my $json = decode_json(encode_utf8($_[0]));
-    # print Dumper($json);
-    if ($json->{'results'}) {
-	$stat{total} = &getValue($json->{'total'});
-	$stat{pageSize} = &getValue($json->{'pageSize'});
-	$stat{page} = &getValue($json->{'page'});
-	@items = @{$json->{'results'}};
-    } else {
-	$stat{total} = 1;
-	$json = decode_json("{\"items\": [".encode_utf8($_[0])."]}");
-	@items = @{$json->{'items'}};
-    };
-    push @oitems,\%stat;
-    foreach (@items) {
-	my %x = %protoFields;
-	## add json string of the item
-	$x{itemdata} = decode_utf8(encode_json($_));
-	$x{itemdatatype} = "json";
-	$x{"title"} = &getValue($_->{"title"});
-	$x{"additionalTitles"} = &getValue($_->{"additionalTitles"});
-	$x{"authors"} = &getValue($_->{"authors"});
- 	my @x = &getArrayFromScalar($_->{'creators'});
-	foreach(@x) { 
-	    $x{authors} .= "[".&getValue($_->{'creatorType'})."] ".&getValue($_->{'lastName'}).", ".&getValue($_->{'firstName'})."; ";
-	};
-	$x{"year"} = &getValue($_->{"year"});
-	$x{"publicationType"} = &getValue($_->{"publicationType"});
-	$x{"containerName"} = &getValue($_->{"containerName"});
-	$x{"isbn"} = &getValue($_->{"isbn"});
-	$x{"doi"} = &getValue($_->{"doi"});
-	$x{"keywords"} = &getValue($_->{"keywords"});
-	$x{"abstract"} = &getValue($_->{"abstract"});
-	@x = &getArrayFromScalar($_->{'tags'});
-	foreach(@x) { 
-	    $x{keywords} .= &getValue($_->{'tag'})."; ";
-	};       
-	push @oitems, \%x;
-    };
-    return @oitems;
-};
-
-
-### XML-based formats
+###---------------------------- XML-based formats ---------------------------------------
 
 sub xmlToJSON() {
     use IPC::Open2;
@@ -982,6 +745,7 @@ sub processWebOfScienceJSON() {
 	    && $_->{"dynamic_data"}->{"cluster_related"}->{"identifiers"} 
 	    && $_->{"dynamic_data"}->{"cluster_related"}->{"identifiers"}->{"identifier"}) {
 	    my @identifiers = &makeArrayFromRefHint($_->{"dynamic_data"}->{"cluster_related"}->{"identifiers"}->{"identifier"},'$_->{"dynamic_data"}->{"cluster_related"}->{"identifiers"}->{"identifier"}');
+	    # Internal identifier should have "WOS-??-..."
 	    foreach (@identifiers) {
 		#say Dumper($_);
 		if ($_->{"_attributes"}) {
@@ -1007,7 +771,7 @@ sub processProQuestXML() {
 };
 
 sub processProQuestJSON() {
-    #TODO likely this doens't capture all aiuthors correctly. - done?!
+    #TODO likely this doens't capture all aiuthors correctly - done?!
     #	print "xxx========== FULL RESULTS ===============\n";
     #	&pretty($_[0]);
     #   if ($repo =~ /^pq/) {
